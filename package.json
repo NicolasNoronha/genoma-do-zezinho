@@ -8,6 +8,8 @@
     "smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
     "postgres": "^3.4.7"
   },
   "engines": {
