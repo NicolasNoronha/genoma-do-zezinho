@@ -1,0 +1,16 @@
+{
+  "name": "genoma-do-zezinho",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check api/index.js && node --check dist/app.js",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "postgres": "^3.4.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

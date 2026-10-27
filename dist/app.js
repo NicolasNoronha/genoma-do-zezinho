@@ -1,31 +1,286 @@
-const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
-const dialog=$('#enrollment-dialog'), adminDialog=$('#admin-dialog'), form=$('#enrollment-form');
-const storageKey='genoma-inscricoes-v1';
-const getStudents=()=>JSON.parse(localStorage.getItem(storageKey)||'[]');
-const saveStudents=(items)=>localStorage.setItem(storageKey,JSON.stringify(items));
-const toast=(message)=>{const el=$('.toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600)};
+const $ = (selector, context = document) => context.querySelector(selector);
+const $$ = (selector, context = document) => [...context.querySelectorAll(selector)];
+const API_URL = '/api';
+const WHATSAPP_NUMBER = '';
+const ENROLLMENT_FEE = 70;
+const MONTHLY_FEE = 90;
 
-const revealObserver=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting)e.target.classList.add('visible')}),{threshold:.12});
-$$('.reveal').forEach(el=>revealObserver.observe(el));
+const state = { students: [], classes: [], charges: [], generatedCharge: null };
+let adminToken = sessionStorage.getItem('gz_admin_token') || '';
+const enrollmentDialog = $('#enrollment-dialog');
+const adminDialog = $('#admin-dialog');
+const enrollmentForm = $('#enrollment-form');
 
-$('.menu-toggle').addEventListener('click',e=>{const nav=$('.main-nav');nav.classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',nav.classList.contains('open'))});
-$$('.main-nav a').forEach(a=>a.addEventListener('click',()=>$('.main-nav').classList.remove('open')));
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+}[char]));
+const formatMoney = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatDate = (value) => {
+  if (!value) return '—';
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('pt-BR');
+};
 
-function setStep(n){$$('.form-step',form).forEach(s=>s.classList.toggle('active',Number(s.dataset.step)===n));$$('.modal-progress i').forEach((i,index)=>i.classList.toggle('active',index<n));}
-function openEnrollment(){form.reset();$('.form-success').classList.remove('active');setStep(1);dialog.showModal()}
-$$('.open-enrollment').forEach(b=>b.addEventListener('click',openEnrollment));
-$$('.modal-close').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
-$$('.next-step').forEach(b=>b.addEventListener('click',()=>{const section=b.closest('.form-step');const fields=$$('input,select,textarea',section);if(fields.every(f=>f.reportValidity()))setStep(Number(section.dataset.step)+1)}));
-$$('.prev-step').forEach(b=>b.addEventListener('click',()=>setStep(Number(b.closest('.form-step').dataset.step)-1)));
-form.addEventListener('submit',e=>{e.preventDefault();if(!form.reportValidity())return;const data=Object.fromEntries(new FormData(form));const id=`GZ-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;const items=getStudents();items.unshift({...data,id,createdAt:new Date().toISOString(),status:'Pré-inscrição'});saveStudents(items);$$('.form-step',form).forEach(s=>s.classList.remove('active'));$('.form-success').classList.add('active');$('.protocol').textContent=`Protocolo ${id}`;$$('.modal-progress i').forEach(i=>i.classList.add('active'));renderAdmin()});
-$('.finish-enrollment').addEventListener('click',()=>dialog.close());
+async function api(action, options = {}) {
+  const { admin = false, ...requestOptions } = options;
+  const response = await fetch(`${API_URL}?action=${encodeURIComponent(action)}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(admin && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+      ...(requestOptions.headers || {}),
+    },
+    ...requestOptions,
+  });
+  let payload;
+  try { payload = await response.json(); } catch { payload = { ok: false, error: 'Resposta inválida da API.' }; }
+  if (!response.ok || payload.ok === false) throw new Error(payload.error || `Erro HTTP ${response.status}`);
+  return payload.data ?? payload;
+}
 
-$('#open-admin').addEventListener('click',()=>{adminDialog.showModal();$('#admin-login').style.display='flex';$('#admin-panel').classList.remove('active')});
-$('#admin-login-form').addEventListener('submit',e=>{e.preventDefault();if($('input',e.currentTarget).value==='2015'){$('#admin-login').style.display='none';$('#admin-panel').classList.add('active');renderAdmin()}else toast('PIN incorreto. Use 2015 nesta demonstração.')});
-$('#admin-logout').addEventListener('click',()=>{adminDialog.close();toast('Sessão demonstrativa encerrada.')});
-$$('[data-admin-view]').forEach(b=>b.addEventListener('click',()=>{$$('[data-admin-view]').forEach(x=>x.classList.toggle('active',x===b));$$('.admin-view').forEach(v=>v.classList.toggle('active',v.id===b.dataset.adminView));$('#admin-title').textContent=b.textContent}));
+function toast(message) {
+  const element = $('.toast');
+  element.textContent = message;
+  element.classList.add('show');
+  setTimeout(() => element.classList.remove('show'), 3200);
+}
 
-function renderAdmin(){const items=getStudents(),count=items.length,percent=Math.min(100,Math.round(count/30*100));$('#metric-students').textContent=count;$('#metric-spots').textContent=Math.max(0,30-count);$('#metric-revenue').textContent=(count*268).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});$('#donut-value').textContent=`${percent}%`;$('.donut').style.background=`conic-gradient(var(--red) ${percent*3.6}deg,var(--line) 0)`;const tbody=$('#students-table');tbody.innerHTML=items.length?items.map(s=>`<tr><td><b>${escapeHtml(s.studentName)}</b><br><small>${escapeHtml(s.id)}</small></td><td>${escapeHtml(s.guardianName)}</td><td>${escapeHtml(s.phone)}<br><small>${escapeHtml(s.email)}</small></td><td><span class="status">${escapeHtml(s.status)}</span></td></tr>`).join(''):'<tr><td colspan="4">Nenhum aluno cadastrado neste navegador.</td></tr>';const activity=$('#activity-list');activity.innerHTML=items.length?items.slice(0,4).map(s=>`<p><b>${escapeHtml(s.studentName)}</b> enviou uma pré-inscrição.</p>`).join(''):'<p>Nenhuma inscrição realizada neste navegador.</p>'}
-const escapeHtml=v=>String(v||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-$('#export-csv').addEventListener('click',()=>{const items=getStudents();if(!items.length)return toast('Ainda não há alunos para exportar.');const rows=[['Aluno','CPF','Nascimento','Responsável','Telefone','Email','Status'],...items.map(s=>[s.studentName,s.studentCpf,s.birthDate,s.guardianName,s.phone,s.email,s.status])];const csv=rows.map(r=>r.map(v=>`"${String(v||'').replaceAll('"','""')}"`).join(';')).join('\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='alunos-genoma-do-zezinho.csv';a.click();URL.revokeObjectURL(a.href)});
-renderAdmin();setStep(1);
+function openWhatsApp(message, phone = '') {
+  const recipient = String(phone || WHATSAPP_NUMBER).replace(/\D/g, '');
+  const base = recipient ? `https://wa.me/${recipient}` : 'https://wa.me/';
+  window.open(`${base}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+}
+
+const revealObserver = new IntersectionObserver((entries) => entries.forEach((entry) => {
+  if (entry.isIntersecting) entry.target.classList.add('visible');
+}), { threshold: .12 });
+$$('.reveal').forEach((element) => revealObserver.observe(element));
+
+$('.menu-toggle').addEventListener('click', (event) => {
+  const navigation = $('.main-nav');
+  navigation.classList.toggle('open');
+  event.currentTarget.setAttribute('aria-expanded', navigation.classList.contains('open'));
+});
+$$('.main-nav a').forEach((anchor) => anchor.addEventListener('click', () => $('.main-nav').classList.remove('open')));
+$$('.whatsapp-contact').forEach((button) => button.addEventListener('click', () => {
+  openWhatsApp('Olá! Gostaria de receber mais informações sobre a escolinha Genoma do Zezinho e a turma Sub-13.');
+}));
+
+function setStep(number) {
+  $$('.form-step', enrollmentForm).forEach((step) => step.classList.toggle('active', Number(step.dataset.step) === number));
+  $$('.modal-progress i').forEach((indicator, index) => indicator.classList.toggle('active', index < number));
+}
+function openEnrollment() {
+  enrollmentForm.reset();
+  $('.form-success').classList.remove('active');
+  setStep(1);
+  enrollmentDialog.showModal();
+}
+$$('.open-enrollment').forEach((button) => button.addEventListener('click', openEnrollment));
+$$('.modal-close').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
+$$('.next-step').forEach((button) => button.addEventListener('click', () => {
+  const section = button.closest('.form-step');
+  if ($$('input,select,textarea', section).every((field) => field.reportValidity())) setStep(Number(section.dataset.step) + 1);
+}));
+$$('.prev-step').forEach((button) => button.addEventListener('click', () => setStep(Number(button.closest('.form-step').dataset.step) - 1)));
+
+enrollmentForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!enrollmentForm.reportValidity()) return;
+  const form = Object.fromEntries(new FormData(enrollmentForm));
+  const submitButton = $('button[type="submit"]', enrollmentForm);
+  submitButton.disabled = true;
+  try {
+    const student = await api('students', { method: 'POST', body: JSON.stringify({
+      full_name: form.studentName, cpf: form.studentCpf, birth_date: form.birthDate,
+      medical_notes: form.medical, guardian_name: form.guardianName, guardian_cpf: form.guardianCpf,
+      relationship: form.relationship, phone: form.phone, email: form.email,
+      image_authorized: Boolean(form.imageAuth), status: 'Pré-inscrição',
+    }) });
+    $$('.form-step', enrollmentForm).forEach((step) => step.classList.remove('active'));
+    $('.form-success').classList.add('active');
+    $('.protocol').textContent = `Cadastro GZ-${student.id}`;
+    $$('.modal-progress i').forEach((indicator) => indicator.classList.add('active'));
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+$('.finish-enrollment').addEventListener('click', () => enrollmentDialog.close());
+
+$('#open-admin').addEventListener('click', () => {
+  adminDialog.showModal();
+  $('#admin-login').style.display = 'flex';
+  $('#admin-panel').classList.remove('active');
+});
+$('#admin-login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('button', event.currentTarget);
+  button.disabled = true;
+  try {
+    const result = await api('login', { method: 'POST', body: JSON.stringify({ pin: $('input', event.currentTarget).value }) });
+    adminToken = result.token;
+    sessionStorage.setItem('gz_admin_token', adminToken);
+    $('#admin-login').style.display = 'none';
+    $('#admin-panel').classList.add('active');
+    await loadAdminData();
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+});
+$('#admin-logout').addEventListener('click', () => { adminToken = ''; sessionStorage.removeItem('gz_admin_token'); adminDialog.close(); });
+$$('[data-admin-view]').forEach((button) => button.addEventListener('click', () => {
+  $$('[data-admin-view]').forEach((item) => item.classList.toggle('active', item === button));
+  $$('.admin-view').forEach((view) => view.classList.toggle('active', view.id === button.dataset.adminView));
+  $('#admin-title').textContent = button.textContent;
+}));
+
+async function loadAdminData() {
+  try {
+    [state.students, state.classes, state.charges] = await Promise.all([api('students', { admin: true }), api('classes'), api('charges', { admin: true })]);
+    renderAdmin();
+  } catch (error) {
+    toast(error.message);
+    renderAdmin();
+    const active = $('.admin-view.active');
+    if (active && !$('.system-alert', active)) active.insertAdjacentHTML('afterbegin', `<div class="system-alert">${escapeHtml(error.message)} Consulte README_SETUP.md para configurar o PostgreSQL.</div>`);
+  }
+}
+
+function renderAdmin() {
+  const totalCapacity = state.classes.reduce((sum, item) => sum + Number(item.capacity || 0), 0);
+  const occupied = state.students.filter((student) => student.class_id).length;
+  const percent = totalCapacity ? Math.min(100, Math.round(occupied / totalCapacity * 100)) : 0;
+  $('#metric-students').textContent = state.students.length;
+  $('#metric-classes').textContent = state.classes.filter((item) => item.active !== false && item.active !== 'f').length;
+  $('#metric-spots').textContent = Math.max(0, totalCapacity - occupied);
+  $('#metric-charges').textContent = state.charges.length;
+  $('#donut-value').textContent = `${percent}%`;
+  $('.donut').style.background = `conic-gradient(var(--red) ${percent * 3.6}deg,var(--line) 0)`;
+  $('#capacity-label').textContent = totalCapacity ? `${occupied} de ${totalCapacity} vagas ocupadas` : 'Cadastre uma turma';
+  $('#activity-list').innerHTML = state.students.length ? state.students.slice(0, 4).map((student) => `<p><b>${escapeHtml(student.full_name)}</b> está com status ${escapeHtml(student.status)}.</p>`).join('') : '<p>Nenhum registro encontrado.</p>';
+  renderStudents(); renderClasses(); renderCharges(); populateSelects();
+}
+
+function populateSelects() {
+  const classOptions = state.classes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} — ${escapeHtml(item.category)}</option>`).join('');
+  $('#student-class').innerHTML = '<option value="">Sem turma</option>' + classOptions;
+  const selectedStudent = $('#charge-student').value;
+  $('#charge-student').innerHTML = '<option value="">Selecione um aluno</option>' + state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.full_name)} — ${escapeHtml(student.guardian_name)}</option>`).join('');
+  if (state.students.some((student) => String(student.id) === selectedStudent)) $('#charge-student').value = selectedStudent;
+}
+
+function renderStudents() {
+  $('#students-table').innerHTML = state.students.length ? state.students.map((student) => `
+    <tr><td><b>${escapeHtml(student.full_name)}</b><br><small>${escapeHtml(student.cpf || `GZ-${student.id}`)}</small></td>
+    <td>${escapeHtml(student.class_name || 'Sem turma')}</td><td>${escapeHtml(student.guardian_name)}</td>
+    <td>${escapeHtml(student.phone)}<br><small>${escapeHtml(student.email)}</small></td><td><span class="status">${escapeHtml(student.status)}</span></td></tr>`).join('') : '<tr><td colspan="5">Nenhum aluno cadastrado.</td></tr>';
+}
+function renderClasses() {
+  $('#classes-total').textContent = `${state.classes.length} ${state.classes.length === 1 ? 'turma' : 'turmas'}`;
+  $('#classes-table').innerHTML = state.classes.length ? state.classes.map((item) => `
+    <tr><td><b>${escapeHtml(item.name)}</b><br><small>${escapeHtml(item.location || 'Em definição')}</small></td>
+    <td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.modality)}</td><td>${item.min_age}–${item.max_age} anos</td>
+    <td>${Number(item.student_count || 0)} / ${Number(item.capacity)}</td><td>${escapeHtml(item.coach_name || 'Não definido')}</td></tr>`).join('') : '<tr><td colspan="6">Nenhuma turma cadastrada.</td></tr>';
+}
+function renderCharges() {
+  $('#charges-total').textContent = `${state.charges.length} ${state.charges.length === 1 ? 'cobrança' : 'cobranças'}`;
+  $('#charges-table').innerHTML = state.charges.length ? state.charges.map((charge) => `
+    <tr><td><b>${escapeHtml(charge.student_name)}</b><br><small>${escapeHtml(charge.guardian_name)}</small></td>
+    <td>${charge.mode === 'subscription' ? 'Assinatura mensal' : 'Cobrança avulsa'}<br><small>${escapeHtml(charge.reference)}</small></td>
+    <td>${formatMoney(charge.total_amount)}</td><td>${formatDate(charge.due_date)}</td><td><span class="status">${escapeHtml(charge.status)}</span></td>
+    <td><div class="charge-actions"><button class="charge-copy" data-copy-link="${escapeHtml(charge.payment_link)}">Copiar</button><button class="charge-send" data-charge-id="${charge.id}">WhatsApp ↗</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhuma cobrança criada.</td></tr>';
+  $$('[data-copy-link]').forEach((button) => button.addEventListener('click', () => copyLink(button.dataset.copyLink)));
+  $$('[data-charge-id]').forEach((button) => button.addEventListener('click', () => sendStoredCharge(button.dataset.chargeId)));
+}
+
+$('#student-admin-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('students', { admin: true, method: 'POST', body: JSON.stringify({
+      full_name: $('#student-name').value, cpf: $('#student-cpf').value, birth_date: $('#student-birth').value,
+      class_id: $('#student-class').value || null, guardian_name: $('#student-guardian').value,
+      relationship: $('#student-relationship').value, phone: $('#student-phone').value,
+      email: $('#student-email').value, medical_notes: $('#student-medical').value, status: 'Ativo',
+    }) });
+    event.currentTarget.reset(); toast('Aluno cadastrado com sucesso.'); await loadAdminData();
+  } catch (error) { toast(error.message); }
+});
+
+$('#class-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('classes', { admin: true, method: 'POST', body: JSON.stringify({
+      name: $('#class-name').value, category: $('#class-category').value, modality: $('#class-modality').value,
+      min_age: $('#class-min-age').value, max_age: $('#class-max-age').value, capacity: $('#class-capacity').value,
+      location: $('#class-location').value, schedule: $('#class-schedule').value, coach_name: $('#class-coach').value,
+    }) });
+    event.currentTarget.reset(); toast('Turma criada com sucesso.'); await loadAdminData();
+  } catch (error) { toast(error.message); }
+});
+
+function updateChargeOptions() {
+  const subscription = $('#charge-mode').value === 'subscription';
+  const enrollment = $('#include-enrollment');
+  const monthly = $('#include-monthly');
+  monthly.checked = true; monthly.disabled = true;
+  if (subscription) { enrollment.checked = false; enrollment.disabled = true; }
+  else enrollment.disabled = false;
+  $('#charge-total-value').textContent = formatMoney(subscription ? MONTHLY_FEE : MONTHLY_FEE + (enrollment.checked ? ENROLLMENT_FEE : 0));
+}
+$('#charge-mode').addEventListener('change', updateChargeOptions);
+$('#include-enrollment').addEventListener('change', updateChargeOptions);
+
+$('#charge-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const student = state.students.find((item) => String(item.id) === $('#charge-student').value);
+  if (!student) return toast('Selecione um aluno.');
+  const submit = $('button[type="submit"]', event.currentTarget);
+  submit.disabled = true; submit.textContent = 'Gerando...';
+  try {
+    const result = await api('charges', { admin: true, method: 'POST', body: JSON.stringify({
+      student_id: student.id, mode: $('#charge-mode').value,
+      include_enrollment: $('#include-enrollment').checked, include_monthly: true,
+      reference: $('#charge-reference').value, due_date: $('#charge-due').value,
+    }) });
+    state.generatedCharge = { ...result, student };
+    $('#charge-result').hidden = false;
+    $('#generated-link').href = result.payment_link;
+    $('#generated-link').textContent = result.payment_link;
+    toast('Link gerado e cobrança salva.');
+    await loadAdminData();
+  } catch (error) { toast(error.message); }
+  finally { submit.disabled = false; submit.textContent = 'Gerar link no Mercado Pago'; }
+});
+
+async function copyLink(link) {
+  if (!link) return toast('Esta cobrança ainda não possui link.');
+  try { await navigator.clipboard.writeText(link); toast('Link copiado.'); }
+  catch { toast('Não foi possível copiar automaticamente.'); }
+}
+$('#copy-payment-link').addEventListener('click', () => copyLink(state.generatedCharge?.payment_link));
+$('#send-payment-whatsapp').addEventListener('click', () => {
+  if (state.generatedCharge) sendChargeMessage(state.generatedCharge, state.generatedCharge.student);
+});
+function sendStoredCharge(id) {
+  const charge = state.charges.find((item) => String(item.id) === String(id));
+  if (charge) sendChargeMessage(charge, { guardian_name: charge.guardian_name, phone: charge.phone });
+}
+function sendChargeMessage(charge, student) {
+  if (!charge.payment_link) return toast('Esta cobrança ainda não possui link.');
+  const label = charge.mode === 'subscription' ? 'assinatura mensal' : 'cobrança';
+  const message = `Olá, ${student.guardian_name}! Segue o link da ${label} da Genoma do Zezinho.\n\nReferência: ${charge.reference || $('#charge-reference').value}\nValor: ${formatMoney(charge.total_amount)}\nVencimento: ${formatDate(charge.due_date || $('#charge-due').value)}\n\n${charge.payment_link}\n\nEm caso de dúvida, estamos à disposição.`;
+  openWhatsApp(message, student.phone);
+}
+
+$('#export-csv').addEventListener('click', () => {
+  if (!state.students.length) return toast('Ainda não há alunos para exportar.');
+  const rows = [['Aluno', 'CPF', 'Nascimento', 'Turma', 'Responsável', 'Telefone', 'Email', 'Status'],
+    ...state.students.map((student) => [student.full_name, student.cpf, student.birth_date, student.class_name, student.guardian_name, student.phone, student.email, student.status])];
+  const csv = rows.map((row) => row.map((value) => `"${String(value || '').replaceAll('"', '""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv' });
+  const anchor = document.createElement('a'); anchor.href = URL.createObjectURL(blob); anchor.download = 'alunos-genoma-do-zezinho.csv'; anchor.click(); URL.revokeObjectURL(anchor.href);
+});
+
+updateChargeOptions();
+renderAdmin();
+setStep(1);

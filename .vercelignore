@@ -1,0 +1,6 @@
+.env
+.htaccess
+INICIAR_BANCO.bat
+src/
+database/
+dist/api/
