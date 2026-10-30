@@ -20,10 +20,22 @@ const formatDate = (value) => {
   const date = new Date(`${value}T12:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('pt-BR');
 };
+const normalizeText = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const studentAge = (value) => {
+  if (!value) return '—';
+  const birth = new Date(value);
+  if (Number.isNaN(birth.getTime())) return '—';
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  if (now < new Date(now.getFullYear(), birth.getMonth(), birth.getDate())) age -= 1;
+  return `${age} anos`;
+};
+const studentInitials = (name) => String(name || 'A').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 
 async function api(action, options = {}) {
   const { admin = false, ...requestOptions } = options;
   const response = await fetch(`${API_URL}?action=${encodeURIComponent(action)}`, {
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(admin && adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
@@ -135,15 +147,17 @@ $$('[data-admin-view]').forEach((button) => button.addEventListener('click', () 
 }));
 
 async function loadAdminData() {
-  try {
-    [state.students, state.classes, state.charges] = await Promise.all([api('students', { admin: true }), api('classes'), api('charges', { admin: true })]);
-    renderAdmin();
-  } catch (error) {
-    toast(error.message);
-    renderAdmin();
-    const active = $('.admin-view.active');
-    if (active && !$('.system-alert', active)) active.insertAdjacentHTML('afterbegin', `<div class="system-alert">${escapeHtml(error.message)} Consulte README_SETUP.md para configurar o PostgreSQL.</div>`);
-  }
+  const results = await Promise.allSettled([
+    api('students', { admin: true }),
+    api('classes'),
+    api('charges', { admin: true }),
+  ]);
+  if (results[0].status === 'fulfilled') state.students = results[0].value;
+  if (results[1].status === 'fulfilled') state.classes = results[1].value;
+  if (results[2].status === 'fulfilled') state.charges = results[2].value;
+  renderAdmin();
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure) toast(failure.reason?.message || 'Parte dos dados não pôde ser atualizada.');
 }
 
 function renderAdmin() {
@@ -164,16 +178,34 @@ function renderAdmin() {
 function populateSelects() {
   const classOptions = state.classes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} — ${escapeHtml(item.category)}</option>`).join('');
   $('#student-class').innerHTML = '<option value="">Sem turma</option>' + classOptions;
+  const selectedClassFilter = $('#student-filter-class').value;
+  $('#student-filter-class').innerHTML = '<option value="">Todas as turmas</option><option value="none">Sem turma</option>' + classOptions;
+  if ([...$('#student-filter-class').options].some((option) => option.value === selectedClassFilter)) $('#student-filter-class').value = selectedClassFilter;
   const selectedStudent = $('#charge-student').value;
   $('#charge-student').innerHTML = '<option value="">Selecione um aluno</option>' + state.students.map((student) => `<option value="${student.id}">${escapeHtml(student.full_name)} — ${escapeHtml(student.guardian_name)}</option>`).join('');
   if (state.students.some((student) => String(student.id) === selectedStudent)) $('#charge-student').value = selectedStudent;
 }
 
 function renderStudents() {
-  $('#students-table').innerHTML = state.students.length ? state.students.map((student) => `
-    <tr><td><b>${escapeHtml(student.full_name)}</b><br><small>${escapeHtml(student.cpf || `GZ-${student.id}`)}</small></td>
-    <td>${escapeHtml(student.class_name || 'Sem turma')}</td><td>${escapeHtml(student.guardian_name)}</td>
-    <td>${escapeHtml(student.phone)}<br><small>${escapeHtml(student.email)}</small></td><td><span class="status">${escapeHtml(student.status)}</span></td></tr>`).join('') : '<tr><td colspan="5">Nenhum aluno cadastrado.</td></tr>';
+  const students = filteredStudents();
+  $('#students-filter-count').textContent = `${students.length} ${students.length === 1 ? 'resultado' : 'resultados'}`;
+  $('#students-table').innerHTML = students.length ? students.map((student) => `
+    <tr><td><span class="student-avatar">${student.photo_url ? `<img src="${escapeHtml(student.photo_url)}" alt="Foto de ${escapeHtml(student.full_name)}" />` : escapeHtml(studentInitials(student.full_name))}</span></td>
+    <td><b>${escapeHtml(student.full_name)}</b><br><small>${escapeHtml(student.cpf || `GZ-${student.id}`)}</small></td>
+    <td>${escapeHtml(student.class_name || 'Sem turma')}</td><td>${escapeHtml(student.guardian_name)}<br><small>${escapeHtml(student.relationship || '')}</small></td>
+    <td>${escapeHtml(student.phone)}<br><small>${escapeHtml(student.email || 'Sem e-mail')}</small></td><td>${studentAge(student.birth_date)}</td><td><span class="status">${escapeHtml(student.status)}</span></td></tr>`).join('') : '<tr><td colspan="7" class="empty-table">Nenhum aluno encontrado com estes filtros.</td></tr>';
+}
+
+function filteredStudents() {
+  const search = normalizeText($('#student-filter-search')?.value);
+  const classId = $('#student-filter-class')?.value || '';
+  const status = $('#student-filter-status')?.value || '';
+  return state.students.filter((student) => {
+    const matchesSearch = !search || normalizeText(`${student.full_name} ${student.cpf || ''}`).includes(search);
+    const matchesClass = !classId || (classId === 'none' ? !student.class_id : String(student.class_id) === classId);
+    const matchesStatus = !status || student.status === status;
+    return matchesSearch && matchesClass && matchesStatus;
+  });
 }
 function renderClasses() {
   $('#classes-total').textContent = `${state.classes.length} ${state.classes.length === 1 ? 'turma' : 'turmas'}`;
@@ -195,15 +227,78 @@ function renderCharges() {
 
 $('#student-admin-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const submit = $('button[type="submit"]', event.currentTarget);
+  const photoFile = $('#student-photo').files[0];
+  submit.disabled = true;
+  submit.textContent = 'Salvando...';
   try {
-    await api('students', { admin: true, method: 'POST', body: JSON.stringify({
+    const created = await api('students', { admin: true, method: 'POST', body: JSON.stringify({
       full_name: $('#student-name').value, cpf: $('#student-cpf').value, birth_date: $('#student-birth').value,
       class_id: $('#student-class').value || null, guardian_name: $('#student-guardian').value,
       relationship: $('#student-relationship').value, phone: $('#student-phone').value,
       email: $('#student-email').value, medical_notes: $('#student-medical').value, status: 'Ativo',
     }) });
-    event.currentTarget.reset(); toast('Aluno cadastrado com sucesso.'); await loadAdminData();
+    created.class_name = state.classes.find((item) => String(item.id) === String(created.class_id))?.name || null;
+    state.students = [created, ...state.students.filter((student) => String(student.id) !== String(created.id))];
+    renderAdmin();
+    let photoWarning = '';
+    if (photoFile) {
+      try {
+        const photo = await api('student_photo', { admin: true, method: 'POST', body: JSON.stringify({ student_id: created.id, data_url: await resizeStudentPhoto(photoFile) }) });
+        Object.assign(created, photo);
+        renderStudents();
+      } catch (error) { photoWarning = `Aluno salvo, mas a foto não foi enviada: ${error.message}`; }
+    }
+    event.currentTarget.reset();
+    resetStudentPhotoPreview();
+    toast(photoWarning || 'Aluno cadastrado e lista atualizada.');
+    await loadAdminData();
   } catch (error) { toast(error.message); }
+  finally { submit.disabled = false; submit.textContent = 'Salvar aluno'; }
+});
+
+async function resizeStudentPhoto(file) {
+  if (!file.type.match(/^image\/(jpeg|png|webp)$/)) throw new Error('Use uma imagem JPG, PNG ou WebP.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('A imagem original deve ter no máximo 8 MB.');
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+    const size = Math.min(image.naturalWidth, image.naturalHeight);
+    const sourceX = (image.naturalWidth - size) / 2;
+    const sourceY = (image.naturalHeight - size) / 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 512;
+    canvas.getContext('2d').drawImage(image, sourceX, sourceY, size, size, 0, 0, 512, 512);
+    return canvas.toDataURL('image/jpeg', .82);
+  } finally { URL.revokeObjectURL(objectUrl); }
+}
+
+function resetStudentPhotoPreview() {
+  const preview = $('#student-photo-preview');
+  preview.style.backgroundImage = '';
+  preview.textContent = '+';
+}
+
+$('#student-photo').addEventListener('change', (event) => {
+  const file = event.currentTarget.files[0];
+  if (!file) return resetStudentPhotoPreview();
+  const preview = $('#student-photo-preview');
+  const objectUrl = URL.createObjectURL(file);
+  preview.style.backgroundImage = `url("${objectUrl}")`;
+  preview.textContent = '';
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+});
+
+['#student-filter-search', '#student-filter-class', '#student-filter-status'].forEach((selector) => {
+  $(selector).addEventListener(selector.includes('search') ? 'input' : 'change', renderStudents);
+});
+$('#clear-student-filters').addEventListener('click', () => {
+  $('#student-filter-search').value = '';
+  $('#student-filter-class').value = '';
+  $('#student-filter-status').value = '';
+  renderStudents();
 });
 
 $('#class-form').addEventListener('submit', async (event) => {
@@ -273,9 +368,10 @@ function sendChargeMessage(charge, student) {
 }
 
 $('#export-csv').addEventListener('click', () => {
-  if (!state.students.length) return toast('Ainda não há alunos para exportar.');
+  const students = filteredStudents();
+  if (!students.length) return toast('Nenhum aluno encontrado para exportar.');
   const rows = [['Aluno', 'CPF', 'Nascimento', 'Turma', 'Responsável', 'Telefone', 'Email', 'Status'],
-    ...state.students.map((student) => [student.full_name, student.cpf, student.birth_date, student.class_name, student.guardian_name, student.phone, student.email, student.status])];
+    ...students.map((student) => [student.full_name, student.cpf, student.birth_date, student.class_name, student.guardian_name, student.phone, student.email, student.status])];
   const csv = rows.map((row) => row.map((value) => `"${String(value || '').replaceAll('"', '""')}"`).join(';')).join('\n');
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv' });
   const anchor = document.createElement('a'); anchor.href = URL.createObjectURL(blob); anchor.download = 'alunos-genoma-do-zezinho.csv'; anchor.click(); URL.revokeObjectURL(anchor.href);

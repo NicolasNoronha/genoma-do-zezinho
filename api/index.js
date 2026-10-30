@@ -22,7 +22,10 @@ function database() {
   }
 }
 
-const json = (res, status, payload) => res.status(status).json(payload);
+const json = (res, status, payload) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  return res.status(status).json(payload);
+};
 const required = (input, fields) => {
   const missing = fields.filter((field) => input[field] === undefined || input[field] === null || String(input[field]).trim() === '');
   if (missing.length) throw new Error(`Preencha os campos obrigatórios: ${missing.join(', ')}.`);
@@ -56,6 +59,67 @@ function requireAdmin(req) {
     error.status = 401;
     throw error;
   }
+}
+
+function supabaseStorage() {
+  const url = String(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    const error = new Error('Fotos ainda não foram configuradas no servidor.');
+    error.status = 503;
+    throw error;
+  }
+  return { url, serviceKey };
+}
+
+const storageObjectPath = (value) => String(value).split('/').map(encodeURIComponent).join('/');
+
+async function signedPhotoUrl(path) {
+  if (!path) return null;
+  try {
+    const { url, serviceKey } = supabaseStorage();
+    const response = await fetch(`${url}/storage/v1/object/sign/student-photos/${storageObjectPath(path)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result.signedURL ? `${url}/storage/v1${result.signedURL}` : null;
+  } catch { return null; }
+}
+
+async function uploadStudentPhoto(studentId, dataUrl) {
+  const match = String(dataUrl || '').match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) {
+    const error = new Error('Formato de foto inválido. Use JPG, PNG ou WebP.');
+    error.status = 400;
+    throw error;
+  }
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length || buffer.length > 1572864) {
+    const error = new Error('A foto deve ter no máximo 1,5 MB.');
+    error.status = 413;
+    throw error;
+  }
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[match[1]];
+  const path = `${studentId}/${crypto.randomUUID()}.${extension}`;
+  const { url, serviceKey } = supabaseStorage();
+  const response = await fetch(`${url}/storage/v1/object/student-photos/${storageObjectPath(path)}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      apikey: serviceKey,
+      'Content-Type': match[1],
+      'x-upsert': 'true',
+    },
+    body: buffer,
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.message || result.error || 'Não foi possível salvar a foto.');
+  }
+  return path;
 }
 
 async function mercadoPago(path, method = 'POST', payload) {
@@ -117,7 +181,11 @@ export default async function handler(req, res) {
     if (action === 'students' && method === 'GET') {
       requireAdmin(req);
       const rows = await sql`select s.*, c.name as class_name from students s left join classes c on c.id = s.class_id order by s.created_at desc`;
-      return json(res, 200, { ok: true, data: rows });
+      const data = await Promise.all(rows.map(async (student) => ({
+        ...student,
+        photo_url: await signedPhotoUrl(student.photo_path),
+      })));
+      return json(res, 200, { ok: true, data });
     }
     if (action === 'students' && method === 'POST') {
       const input = bodyOf(req); required(input, ['full_name', 'birth_date', 'guardian_name', 'phone']);
@@ -127,6 +195,15 @@ export default async function handler(req, res) {
       const [row] = await sql`insert into students (class_id, full_name, cpf, birth_date, medical_notes, guardian_name, guardian_cpf, relationship, phone, email, image_authorized, status)
         values (${classId}, ${String(input.full_name).trim()}, ${String(input.cpf || '').trim() || null}, ${input.birth_date}, ${String(input.medical_notes || '').trim()}, ${String(input.guardian_name).trim()}, ${String(input.guardian_cpf || '').trim() || null}, ${String(input.relationship || '').trim()}, ${String(input.phone).trim()}, ${String(input.email || '').trim() || null}, ${Boolean(input.image_authorized)}, ${status}) returning *`;
       return json(res, 201, { ok: true, data: row });
+    }
+    if (action === 'student_photo' && method === 'POST') {
+      requireAdmin(req);
+      const input = bodyOf(req); required(input, ['student_id', 'data_url']);
+      const [student] = await sql`select id, photo_path from students where id = ${Number(input.student_id)}`;
+      if (!student) return json(res, 404, { ok: false, error: 'Aluno não encontrado.' });
+      const path = await uploadStudentPhoto(student.id, input.data_url);
+      await sql`update students set photo_path = ${path}, updated_at = now() where id = ${student.id}`;
+      return json(res, 200, { ok: true, data: { photo_path: path, photo_url: await signedPhotoUrl(path) } });
     }
     if (action === 'charges' && method === 'GET') {
       requireAdmin(req);
@@ -176,6 +253,8 @@ export default async function handler(req, res) {
     return json(res, 404, { ok: false, error: 'Rota não encontrada.' });
   } catch (error) {
     console.error(error);
+    if (error.code === '23505') return json(res, 409, { ok: false, error: 'Já existe um aluno cadastrado com este CPF.' });
+    if (error.code === '23503') return json(res, 400, { ok: false, error: 'A turma selecionada não existe mais.' });
     return json(res, error.status || 500, { ok: false, error: error.message || 'Erro interno.' });
   }
 }

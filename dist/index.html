@@ -161,12 +161,17 @@
         <div id="students" class="admin-view">
           <form id="student-admin-form" class="management-form">
             <div class="table-head"><div><small>Novo cadastro</small><h3>Cadastrar aluno</h3></div><span>Dados gravados no PostgreSQL</span></div>
-            <div class="form-row"><label>Nome completo<input required id="student-name" /></label><label>CPF<input id="student-cpf" placeholder="000.000.000-00" /></label><label>Data de nascimento<input required id="student-birth" type="date" /></label></div>
+            <div class="student-create-grid">
+              <label class="student-photo-field" for="student-photo"><span id="student-photo-preview" class="student-photo-preview">+</span><b>Foto do aluno</b><small>JPG, PNG ou WebP</small><input id="student-photo" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+              <div><div class="form-row"><label>Nome completo<input required id="student-name" /></label><label>CPF<input id="student-cpf" placeholder="000.000.000-00" /></label><label>Data de nascimento<input required id="student-birth" type="date" /></label></div>
             <div class="form-row"><label>Turma<select id="student-class"><option value="">Sem turma</option></select></label><label>Responsável<input required id="student-guardian" /></label><label>Parentesco<input id="student-relationship" placeholder="Mãe, pai..." /></label></div>
-            <div class="form-row"><label>Telefone/WhatsApp<input required id="student-phone" placeholder="(51) 99999-9999" /></label><label>E-mail<input id="student-email" type="email" /></label><label>Observações médicas<input id="student-medical" /></label></div>
+              <div class="form-row"><label>Telefone/WhatsApp<input required id="student-phone" placeholder="(51) 99999-9999" /></label><label>E-mail<input id="student-email" type="email" /></label><label>Observações médicas<input id="student-medical" /></label></div></div>
+            </div>
             <button class="btn" type="submit">Salvar aluno</button>
           </form>
-          <div class="table-card"><div class="table-head"><h3>Alunos cadastrados</h3><button id="export-csv">Exportar CSV</button></div><div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma</th><th>Responsável</th><th>Contato</th><th>Status</th></tr></thead><tbody id="students-table"></tbody></table></div></div>
+          <div class="table-card"><div class="table-head"><div><h3>Alunos cadastrados</h3><small id="students-filter-count">0 resultados</small></div><button id="export-csv">Exportar CSV</button></div>
+            <div class="student-filters"><label><span>Buscar aluno</span><input id="student-filter-search" type="search" placeholder="Nome ou CPF" /></label><label><span>Turma</span><select id="student-filter-class"><option value="">Todas as turmas</option></select></label><label><span>Status</span><select id="student-filter-status"><option value="">Todos</option><option>Ativo</option><option>Pré-inscrição</option></select></label><button type="button" id="clear-student-filters">Limpar filtros</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Foto</th><th>Aluno</th><th>Turma</th><th>Responsável</th><th>Contato</th><th>Idade</th><th>Status</th></tr></thead><tbody id="students-table"></tbody></table></div></div>
         </div>
         <div id="classes" class="admin-view">
           <form id="class-form" class="management-form">
@@ -200,6 +205,6 @@
   </dialog>
 
   <div class="toast" role="status"></div>
-  <script src="app.js?v=20261027-prod"></script>
+  <script src="app.js?v=20261030-admin"></script>
 </body>
 </html>
