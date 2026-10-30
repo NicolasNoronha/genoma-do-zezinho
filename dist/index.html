@@ -6,7 +6,7 @@
   <meta name="description" content="Genoma do Zezinho — escolinha de futebol 7 para jovens de 12 e 13 anos em Porto Alegre e região." />
   <meta name="theme-color" content="#a92d35" />
   <title>Genoma do Zezinho | Futebol, formação e futuro</title>
-  <link rel="stylesheet" href="styles.css?v=20261030-site" />
+  <link rel="stylesheet" href="styles.css?v=20261030-admin-v2" />
 </head>
 <body>
   <div class="notice"><span>Temporada de lançamento</span><strong>30 vagas para o Sub-13</strong></div>
@@ -167,24 +167,28 @@
     <button class="modal-close" aria-label="Fechar">×</button>
     <section id="admin-login" class="admin-login"><span class="brand-mark">GZ</span><p class="eyebrow"><span></span> Área administrativa</p><h2>Gestão da escolinha</h2><p>Informe seu PIN administrativo.</p><form id="admin-login-form"><input maxlength="12" inputmode="numeric" placeholder="••••" aria-label="PIN de acesso" autocomplete="current-password" required /><button class="btn">Entrar →</button></form></section>
     <section id="admin-panel" class="admin-panel">
-      <aside><div class="brand"><span class="brand-mark">GZ</span><span><b>GENOMA</b><small>GESTÃO</small></span></div><nav><button class="active" data-admin-view="dashboard">Visão geral</button><button data-admin-view="students">Alunos</button><button data-admin-view="classes">Turmas</button><button data-admin-view="finance">Financeiro</button><button data-admin-view="galleryAdmin">Galeria</button></nav><button id="admin-logout">Sair</button></aside>
+      <aside><div class="brand"><span class="brand-mark">GZ</span><span><b>GENOMA</b><small>GESTÃO</small></span></div><nav><button class="active" data-admin-view="dashboard" data-label="Visão geral"><span>⌂</span> Visão geral</button><button data-admin-view="students" data-label="Alunos"><span>◎</span> Alunos</button><button data-admin-view="classes" data-label="Turmas"><span>▦</span> Turmas</button><button data-admin-view="finance" data-label="Financeiro"><span>↗</span> Financeiro</button><button data-admin-view="galleryAdmin" data-label="Galeria"><span>◇</span> Galeria</button></nav><button id="admin-logout">Sair da área administrativa</button></aside>
       <div class="admin-content">
         <header><div><small>Temporada 2026</small><h2 id="admin-title">Visão geral</h2></div><span class="admin-avatar">ZE</span></header>
         <div id="dashboard" class="admin-view active"><div class="metric-grid"><article><span>Alunos cadastrados</span><b id="metric-students">0</b><small>ativos e pré-inscritos</small></article><article><span>Turmas ativas</span><b id="metric-classes">0</b><small>categorias cadastradas</small></article><article><span>Vagas disponíveis</span><b id="metric-spots">0</b><small>todas as turmas</small></article><article><span>Cobranças criadas</span><b id="metric-charges">0</b><small>avulsas e recorrentes</small></article></div><div class="admin-grid"><article><h3>Ocupação geral</h3><div class="donut"><span id="donut-value">0%</span></div><p id="capacity-label">Cadastre uma turma</p></article><article class="activity"><h3>Atividade recente</h3><div id="activity-list"><p>Nenhum registro encontrado.</p></div></article></div></div>
         <div id="students" class="admin-view">
-          <form id="student-admin-form" class="management-form">
-            <div class="table-head"><div><small>Novo cadastro</small><h3>Cadastrar aluno</h3></div><span>Dados gravados no PostgreSQL</span></div>
+          <div class="admin-page-intro"><div><span>Gestão de atletas</span><h3>Alunos e responsáveis</h3><p>Cadastre, consulte e mantenha os dados da turma sempre atualizados.</p></div><div class="student-summary"><span><b id="student-active-count">0</b> ativos</span><span><b id="student-photo-count">0</b> com foto</span></div></div>
+          <form id="student-admin-form" class="management-form student-editor" novalidate>
+            <input id="student-edit-id" type="hidden" />
+            <div class="editor-head"><div><small id="student-form-kicker">Novo cadastro</small><h3 id="student-form-title">Cadastrar aluno</h3><p id="student-form-description">Preencha os dados e selecione uma turma compatível com a idade.</p></div><button id="cancel-student-edit" type="button" hidden>Cancelar edição</button></div>
             <div class="student-create-grid">
-              <label class="student-photo-field" for="student-photo"><span id="student-photo-preview" class="student-photo-preview">+</span><b>Foto do aluno</b><small>JPG, PNG ou WebP</small><input id="student-photo" type="file" accept="image/jpeg,image/png,image/webp" /></label>
-              <div><div class="form-row"><label>Nome completo<input required id="student-name" /></label><label>CPF<input id="student-cpf" placeholder="000.000.000-00" /></label><label>Data de nascimento<input required id="student-birth" type="date" /></label></div>
-            <div class="form-row"><label>Turma<select id="student-class"><option value="">Sem turma</option></select></label><label>Responsável<input required id="student-guardian" /></label><label>Parentesco<input id="student-relationship" placeholder="Mãe, pai..." /></label></div>
-              <div class="form-row"><label>Telefone/WhatsApp<input required id="student-phone" placeholder="(51) 99999-9999" /></label><label>E-mail<input id="student-email" type="email" /></label><label>Observações médicas<input id="student-medical" /></label></div></div>
+              <label class="student-photo-field" for="student-photo"><span id="student-photo-preview" class="student-photo-preview">+</span><b>Foto do aluno</b><small>Privada · JPG, PNG ou WebP</small><span class="photo-action">Selecionar imagem</span><input id="student-photo" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+              <div class="student-form-sections">
+                <fieldset><legend>Dados do aluno</legend><div class="form-row"><label>Nome completo<input required minlength="3" id="student-name" autocomplete="name" placeholder="Nome e sobrenome" /></label><label>CPF<input required id="student-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" /></label><label>Data de nascimento<input required id="student-birth" type="date" /></label></div><div class="form-row"><label>Turma<select id="student-class"><option value="">Sem turma</option></select><small id="student-age-hint">Selecione uma turma para validar a faixa etária.</small></label><label>Status<select id="student-status"><option>Ativo</option><option>Pré-inscrição</option><option>Inativo</option></select></label><label>Parentesco<input id="student-relationship" placeholder="Mãe, pai..." /></label></div></fieldset>
+                <fieldset><legend>Responsável e contato</legend><div class="form-row"><label>Nome do responsável<input required minlength="3" id="student-guardian" /></label><label>CPF do responsável<input id="student-guardian-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" /></label><label>Telefone/WhatsApp<input required id="student-phone" type="tel" maxlength="15" placeholder="(51) 99999-9999" /></label></div><div class="form-row two-columns"><label>E-mail<input id="student-email" type="email" autocomplete="email" placeholder="nome@email.com" /></label><label>Observações médicas<textarea id="student-medical" rows="2" placeholder="Alergias, restrições ou medicamentos"></textarea></label></div></fieldset>
+                <label class="consent-row"><input id="student-image-authorized" type="checkbox" /><span><b>Uso de imagem autorizado</b><small>Registre somente quando houver autorização do responsável.</small></span></label>
+              </div>
             </div>
-            <button class="btn" type="submit">Salvar aluno</button>
+            <div class="editor-actions"><span id="student-validation-summary" role="alert"></span><button class="btn" id="save-student" type="submit">Salvar aluno</button></div>
           </form>
           <div class="table-card"><div class="table-head"><div><h3>Alunos cadastrados</h3><small id="students-filter-count">0 resultados</small></div><button id="export-csv">Exportar CSV</button></div>
-            <div class="student-filters"><label><span>Buscar aluno</span><input id="student-filter-search" type="search" placeholder="Nome ou CPF" /></label><label><span>Turma</span><select id="student-filter-class"><option value="">Todas as turmas</option></select></label><label><span>Status</span><select id="student-filter-status"><option value="">Todos</option><option>Ativo</option><option>Pré-inscrição</option></select></label><button type="button" id="clear-student-filters">Limpar filtros</button></div>
-            <div class="table-wrap"><table><thead><tr><th>Foto</th><th>Aluno</th><th>Turma</th><th>Responsável</th><th>Contato</th><th>Idade</th><th>Status</th></tr></thead><tbody id="students-table"></tbody></table></div></div>
+            <div class="student-filters"><label><span>Buscar aluno</span><input id="student-filter-search" type="search" placeholder="Nome, CPF ou responsável" /></label><label><span>Turma</span><select id="student-filter-class"><option value="">Todas as turmas</option></select></label><label><span>Status</span><select id="student-filter-status"><option value="">Todos</option><option>Ativo</option><option>Pré-inscrição</option><option>Inativo</option></select></label><button type="button" id="clear-student-filters">Limpar filtros</button></div>
+            <div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Turma</th><th>Responsável</th><th>Contato</th><th>Idade</th><th>Status</th><th>Ações</th></tr></thead><tbody id="students-table"></tbody></table></div></div>
         </div>
         <div id="classes" class="admin-view">
           <form id="class-form" class="management-form">
@@ -213,12 +217,12 @@
           </div>
           <div class="table-card"><div class="table-head"><h3>Cobranças cadastradas</h3><span id="charges-total">0 cobranças</span></div><div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Descrição</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead><tbody id="charges-table"></tbody></table></div></div>
         </div>
-        <div id="galleryAdmin" class="admin-view"><div class="empty-state"><span>▧</span><h3>4 imagens no acervo</h3><p>O envio e a autorização de novas fotos entrarão na versão com armazenamento online.</p></div></div>
+        <div id="galleryAdmin" class="admin-view"><div class="empty-state"><span>▧</span><h3>Acervo e imagens</h3><p>As fotos individuais são gerenciadas na ficha de cada aluno e armazenadas de forma privada. Aqui ficará o acervo público de treinos, jogos e eventos.</p></div></div>
       </div>
     </section>
   </dialog>
 
   <div class="toast" role="status"></div>
-  <script src="app.js?v=20261030-site"></script>
+  <script src="app.js?v=20261030-admin-v2"></script>
 </body>
 </html>

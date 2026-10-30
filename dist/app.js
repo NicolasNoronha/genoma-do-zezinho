@@ -21,16 +21,40 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('pt-BR');
 };
 const normalizeText = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-const studentAge = (value) => {
+const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+const ageNumber = (value) => {
   if (!value) return '—';
   const birth = new Date(value);
   if (Number.isNaN(birth.getTime())) return '—';
   const now = new Date();
   let age = now.getFullYear() - birth.getFullYear();
   if (now < new Date(now.getFullYear(), birth.getMonth(), birth.getDate())) age -= 1;
-  return `${age} anos`;
+  return age;
 };
+const studentAge = (value) => { const age = ageNumber(value); return age === '—' ? age : `${age} anos`; };
 const studentInitials = (name) => String(name || 'A').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+const formatCpf = (value) => onlyDigits(value).slice(0, 11).replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+const formatPhone = (value) => {
+  const digits = onlyDigits(value).slice(0, 11);
+  if (digits.length <= 10) return digits.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{4})(\d)/, '$1-$2');
+  return digits.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2');
+};
+const validCpf = (value) => {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return (remainder === 10 ? 0 : remainder) === Number(cpf[length]);
+  };
+  return digit(9) && digit(10);
+};
+const dateValue = (value) => String(value || '').slice(0, 10);
+const isoLocalDate = (date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
 
 async function api(action, options = {}) {
   const { admin = false, ...requestOptions } = options;
@@ -83,6 +107,7 @@ function setStep(number) {
 }
 function openEnrollment() {
   enrollmentForm.reset();
+  $$('input', enrollmentForm).forEach((input) => input.setCustomValidity(''));
   $('.form-success').classList.remove('active');
   setStep(1);
   enrollmentDialog.showModal();
@@ -94,6 +119,31 @@ $$('.next-step').forEach((button) => button.addEventListener('click', () => {
   if ($$('input,select,textarea', section).every((field) => field.reportValidity())) setStep(Number(section.dataset.step) + 1);
 }));
 $$('.prev-step').forEach((button) => button.addEventListener('click', () => setStep(Number(button.closest('.form-step').dataset.step) - 1)));
+
+function configurePublicBirthRange() {
+  const classRow = state.classes.find((item) => item.active !== false && item.active !== 'f') || state.classes[0];
+  const input = $('[name="birthDate"]', enrollmentForm);
+  if (!classRow || !input) return;
+  const today = new Date();
+  const latest = new Date(today); latest.setFullYear(today.getFullYear() - Number(classRow.min_age));
+  const earliest = new Date(today); earliest.setFullYear(today.getFullYear() - Number(classRow.max_age) - 1); earliest.setDate(earliest.getDate() + 1);
+  input.min = isoLocalDate(earliest); input.max = isoLocalDate(latest);
+}
+
+['studentCpf', 'guardianCpf'].forEach((name) => {
+  const input = $(`[name="${name}"]`, enrollmentForm);
+  input.addEventListener('input', () => {
+    input.value = formatCpf(input.value);
+    input.setCustomValidity(input.value && !validCpf(input.value) ? 'Informe um CPF válido.' : '');
+  });
+});
+const publicPhone = $('[name="phone"]', enrollmentForm);
+publicPhone.addEventListener('input', () => {
+  publicPhone.value = formatPhone(publicPhone.value);
+  publicPhone.setCustomValidity(publicPhone.value && onlyDigits(publicPhone.value).length < 10 ? 'Informe um telefone com DDD.' : '');
+});
+
+api('classes').then((classes) => { state.classes = classes; configurePublicBirthRange(); }).catch(() => {});
 
 enrollmentForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -144,7 +194,7 @@ $('#admin-logout').addEventListener('click', () => { adminToken = ''; sessionSto
 $$('[data-admin-view]').forEach((button) => button.addEventListener('click', () => {
   $$('[data-admin-view]').forEach((item) => item.classList.toggle('active', item === button));
   $$('.admin-view').forEach((view) => view.classList.toggle('active', view.id === button.dataset.adminView));
-  $('#admin-title').textContent = button.textContent;
+  $('#admin-title').textContent = button.dataset.label || button.textContent.trim();
 }));
 
 async function loadAdminData() {
@@ -163,12 +213,14 @@ async function loadAdminData() {
 
 function renderAdmin() {
   const totalCapacity = state.classes.reduce((sum, item) => sum + Number(item.capacity || 0), 0);
-  const occupied = state.students.filter((student) => student.class_id).length;
+  const occupied = state.students.filter((student) => student.class_id && student.status !== 'Inativo').length;
   const percent = totalCapacity ? Math.min(100, Math.round(occupied / totalCapacity * 100)) : 0;
   $('#metric-students').textContent = state.students.length;
   $('#metric-classes').textContent = state.classes.filter((item) => item.active !== false && item.active !== 'f').length;
   $('#metric-spots').textContent = Math.max(0, totalCapacity - occupied);
   $('#metric-charges').textContent = state.charges.length;
+  $('#student-active-count').textContent = state.students.filter((student) => student.status === 'Ativo').length;
+  $('#student-photo-count').textContent = state.students.filter((student) => student.photo_path || student.photo_url).length;
   $('#donut-value').textContent = `${percent}%`;
   $('.donut').style.background = `conic-gradient(var(--red) ${percent * 3.6}deg,var(--line) 0)`;
   $('#capacity-label').textContent = totalCapacity ? `${occupied} de ${totalCapacity} vagas ocupadas` : 'Cadastre uma turma';
@@ -177,7 +229,7 @@ function renderAdmin() {
 }
 
 function populateSelects() {
-  const classOptions = state.classes.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} — ${escapeHtml(item.category)}</option>`).join('');
+  const classOptions = state.classes.map((item) => `<option value="${item.id}" data-min-age="${item.min_age}" data-max-age="${item.max_age}">${escapeHtml(item.name)} — ${escapeHtml(item.category)} (${item.min_age}–${item.max_age} anos)</option>`).join('');
   $('#student-class').innerHTML = '<option value="">Sem turma</option>' + classOptions;
   const selectedClassFilter = $('#student-filter-class').value;
   $('#student-filter-class').innerHTML = '<option value="">Todas as turmas</option><option value="none">Sem turma</option>' + classOptions;
@@ -191,10 +243,12 @@ function renderStudents() {
   const students = filteredStudents();
   $('#students-filter-count').textContent = `${students.length} ${students.length === 1 ? 'resultado' : 'resultados'}`;
   $('#students-table').innerHTML = students.length ? students.map((student) => `
-    <tr><td><span class="student-avatar">${student.photo_url ? `<img src="${escapeHtml(student.photo_url)}" alt="Foto de ${escapeHtml(student.full_name)}" />` : escapeHtml(studentInitials(student.full_name))}</span></td>
-    <td><b>${escapeHtml(student.full_name)}</b><br><small>${escapeHtml(student.cpf || `GZ-${student.id}`)}</small></td>
+    <tr class="${student.status === 'Inativo' ? 'student-inactive' : ''}"><td><div class="student-identity"><span class="student-avatar">${student.photo_url ? `<img src="${escapeHtml(student.photo_url)}" alt="Foto de ${escapeHtml(student.full_name)}" />` : escapeHtml(studentInitials(student.full_name))}</span><span><b>${escapeHtml(student.full_name)}</b><small>${escapeHtml(student.cpf ? formatCpf(student.cpf) : `GZ-${student.id}`)}</small></span></div></td>
     <td>${escapeHtml(student.class_name || 'Sem turma')}</td><td>${escapeHtml(student.guardian_name)}<br><small>${escapeHtml(student.relationship || '')}</small></td>
-    <td>${escapeHtml(student.phone)}<br><small>${escapeHtml(student.email || 'Sem e-mail')}</small></td><td>${studentAge(student.birth_date)}</td><td><span class="status">${escapeHtml(student.status)}</span></td></tr>`).join('') : '<tr><td colspan="7" class="empty-table">Nenhum aluno encontrado com estes filtros.</td></tr>';
+    <td>${escapeHtml(formatPhone(student.phone))}<br><small>${escapeHtml(student.email || 'Sem e-mail')}</small></td><td>${studentAge(student.birth_date)}</td><td><span class="status status-${normalizeText(student.status)}">${escapeHtml(student.status)}</span></td>
+    <td><div class="row-actions"><button type="button" class="student-edit" data-student-edit="${student.id}" aria-label="Editar ${escapeHtml(student.full_name)}">Editar</button><button type="button" class="student-delete" data-student-delete="${student.id}" aria-label="Remover ${escapeHtml(student.full_name)}">Remover</button></div></td></tr>`).join('') : '<tr><td colspan="7" class="empty-table">Nenhum aluno encontrado com estes filtros.</td></tr>';
+  $$('[data-student-edit]').forEach((button) => button.addEventListener('click', () => startStudentEdit(button.dataset.studentEdit)));
+  $$('[data-student-delete]').forEach((button) => button.addEventListener('click', () => removeStudent(button.dataset.studentDelete)));
 }
 
 function filteredStudents() {
@@ -202,7 +256,7 @@ function filteredStudents() {
   const classId = $('#student-filter-class')?.value || '';
   const status = $('#student-filter-status')?.value || '';
   return state.students.filter((student) => {
-    const matchesSearch = !search || normalizeText(`${student.full_name} ${student.cpf || ''}`).includes(search);
+    const matchesSearch = !search || normalizeText(`${student.full_name} ${student.cpf || ''} ${student.guardian_name || ''} ${student.phone || ''} ${student.email || ''}`).includes(search);
     const matchesClass = !classId || (classId === 'none' ? !student.class_id : String(student.class_id) === classId);
     const matchesStatus = !status || student.status === status;
     return matchesSearch && matchesClass && matchesStatus;
@@ -226,36 +280,146 @@ function renderCharges() {
   $$('[data-charge-id]').forEach((button) => button.addEventListener('click', () => sendStoredCharge(button.dataset.chargeId)));
 }
 
+function updateStudentBirthLimits() {
+  const classRow = state.classes.find((item) => String(item.id) === $('#student-class').value);
+  const birth = $('#student-birth');
+  if (!classRow) {
+    birth.removeAttribute('min'); birth.removeAttribute('max');
+    $('#student-age-hint').textContent = 'Selecione uma turma para validar a faixa etária.';
+    return;
+  }
+  const today = new Date();
+  const latest = new Date(today); latest.setFullYear(today.getFullYear() - Number(classRow.min_age));
+  const earliest = new Date(today); earliest.setFullYear(today.getFullYear() - Number(classRow.max_age) - 1); earliest.setDate(earliest.getDate() + 1);
+  birth.min = isoLocalDate(earliest); birth.max = isoLocalDate(latest);
+  $('#student-age-hint').textContent = `${classRow.name}: de ${classRow.min_age} a ${classRow.max_age} anos (${formatDate(birth.min)} a ${formatDate(birth.max)}).`;
+}
+
+function validateStudentForm() {
+  const form = $('#student-admin-form');
+  const cpf = $('#student-cpf');
+  const guardianCpf = $('#student-guardian-cpf');
+  const phone = $('#student-phone');
+  const birth = $('#student-birth');
+  [cpf, guardianCpf, phone, birth].forEach((field) => field.setCustomValidity(''));
+  if (!validCpf(cpf.value)) cpf.setCustomValidity('Informe um CPF válido para o aluno.');
+  if (guardianCpf.value && !validCpf(guardianCpf.value)) guardianCpf.setCustomValidity('Informe um CPF válido para o responsável.');
+  if (onlyDigits(phone.value).length < 10) phone.setCustomValidity('Informe um telefone com DDD.');
+  if (birth.value && (birth.min && birth.value < birth.min || birth.max && birth.value > birth.max)) {
+    const classRow = state.classes.find((item) => String(item.id) === $('#student-class').value);
+    birth.setCustomValidity(`A idade precisa estar entre ${classRow?.min_age} e ${classRow?.max_age} anos para esta turma.`);
+  }
+  const valid = form.checkValidity();
+  const firstInvalid = $(':invalid', form);
+  $('#student-validation-summary').textContent = valid ? '' : (firstInvalid?.validationMessage || 'Revise os campos destacados.');
+  if (!valid) firstInvalid?.reportValidity();
+  return valid;
+}
+
+function studentFormPayload() {
+  return {
+    id: $('#student-edit-id').value || undefined,
+    full_name: $('#student-name').value, cpf: $('#student-cpf').value, birth_date: $('#student-birth').value,
+    class_id: $('#student-class').value || null, guardian_name: $('#student-guardian').value,
+    guardian_cpf: $('#student-guardian-cpf').value, relationship: $('#student-relationship').value,
+    phone: $('#student-phone').value, email: $('#student-email').value, medical_notes: $('#student-medical').value,
+    image_authorized: $('#student-image-authorized').checked, status: $('#student-status').value,
+  };
+}
+
+function resetStudentForm() {
+  const form = $('#student-admin-form');
+  form.reset();
+  $('#student-edit-id').value = '';
+  $('#student-form-kicker').textContent = 'Novo cadastro';
+  $('#student-form-title').textContent = 'Cadastrar aluno';
+  $('#student-form-description').textContent = 'Preencha os dados e selecione uma turma compatível com a idade.';
+  $('#cancel-student-edit').hidden = true;
+  $('#save-student').textContent = 'Salvar aluno';
+  $('#student-validation-summary').textContent = '';
+  resetStudentPhotoPreview();
+  updateStudentBirthLimits();
+}
+
+function startStudentEdit(id) {
+  const student = state.students.find((item) => String(item.id) === String(id));
+  if (!student) return;
+  resetStudentForm();
+  $('#student-edit-id').value = student.id;
+  $('#student-name').value = student.full_name || '';
+  $('#student-cpf').value = formatCpf(student.cpf);
+  $('#student-birth').value = dateValue(student.birth_date);
+  $('#student-class').value = student.class_id || '';
+  $('#student-status').value = student.status || 'Ativo';
+  $('#student-guardian').value = student.guardian_name || '';
+  $('#student-guardian-cpf').value = formatCpf(student.guardian_cpf);
+  $('#student-relationship').value = student.relationship || '';
+  $('#student-phone').value = formatPhone(student.phone);
+  $('#student-email').value = student.email || '';
+  $('#student-medical').value = student.medical_notes || '';
+  $('#student-image-authorized').checked = Boolean(student.image_authorized);
+  $('#student-form-kicker').textContent = `Aluno GZ-${student.id}`;
+  $('#student-form-title').textContent = 'Editar cadastro';
+  $('#student-form-description').textContent = 'As alterações serão aplicadas imediatamente à ficha do aluno.';
+  $('#cancel-student-edit').hidden = false;
+  $('#save-student').textContent = 'Salvar alterações';
+  updateStudentBirthLimits();
+  if (student.photo_url) {
+    $('#student-photo-preview').style.backgroundImage = `url("${student.photo_url}")`;
+    $('#student-photo-preview').textContent = '';
+  }
+  $('#student-admin-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function removeStudent(id) {
+  const student = state.students.find((item) => String(item.id) === String(id));
+  if (!student || !window.confirm(`Remover o cadastro de ${student.full_name}? Esta ação não poderá ser desfeita.`)) return;
+  try {
+    await api('students', { admin: true, method: 'DELETE', body: JSON.stringify({ id: student.id }) });
+    state.students = state.students.filter((item) => String(item.id) !== String(student.id));
+    if ($('#student-edit-id').value === String(student.id)) resetStudentForm();
+    renderAdmin();
+    toast('Aluno removido com sucesso.');
+  } catch (error) { toast(error.message); }
+}
+
+$('#student-class').addEventListener('change', updateStudentBirthLimits);
+$('#cancel-student-edit').addEventListener('click', resetStudentForm);
+$('#student-cpf').addEventListener('input', (event) => { event.currentTarget.value = formatCpf(event.currentTarget.value); event.currentTarget.setCustomValidity(''); });
+$('#student-guardian-cpf').addEventListener('input', (event) => { event.currentTarget.value = formatCpf(event.currentTarget.value); event.currentTarget.setCustomValidity(''); });
+$('#student-phone').addEventListener('input', (event) => { event.currentTarget.value = formatPhone(event.currentTarget.value); event.currentTarget.setCustomValidity(''); });
+$('#student-birth').addEventListener('input', (event) => event.currentTarget.setCustomValidity(''));
+
 $('#student-admin-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const submit = $('button[type="submit"]', event.currentTarget);
+  if (!validateStudentForm()) return;
+  const submit = $('#save-student');
   const photoFile = $('#student-photo').files[0];
+  const payload = studentFormPayload();
+  const editing = Boolean(payload.id);
+  const previous = state.students.find((student) => String(student.id) === String(payload.id));
   submit.disabled = true;
-  submit.textContent = 'Salvando...';
+  submit.textContent = editing ? 'Atualizando...' : 'Salvando...';
   try {
-    const created = await api('students', { admin: true, method: 'POST', body: JSON.stringify({
-      full_name: $('#student-name').value, cpf: $('#student-cpf').value, birth_date: $('#student-birth').value,
-      class_id: $('#student-class').value || null, guardian_name: $('#student-guardian').value,
-      relationship: $('#student-relationship').value, phone: $('#student-phone').value,
-      email: $('#student-email').value, medical_notes: $('#student-medical').value, status: 'Ativo',
-    }) });
-    created.class_name = state.classes.find((item) => String(item.id) === String(created.class_id))?.name || null;
-    state.students = [created, ...state.students.filter((student) => String(student.id) !== String(created.id))];
-    renderAdmin();
+    const saved = await api('students', { admin: true, method: editing ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+    saved.class_name = saved.class_name || state.classes.find((item) => String(item.id) === String(saved.class_id))?.name || null;
+    saved.photo_url = saved.photo_url || previous?.photo_url || null;
+    state.students = editing
+      ? state.students.map((student) => String(student.id) === String(saved.id) ? saved : student)
+      : [saved, ...state.students];
     let photoWarning = '';
     if (photoFile) {
       try {
-        const photo = await api('student_photo', { admin: true, method: 'POST', body: JSON.stringify({ student_id: created.id, data_url: await resizeStudentPhoto(photoFile) }) });
-        Object.assign(created, photo);
-        renderStudents();
-      } catch (error) { photoWarning = `Aluno salvo, mas a foto não foi enviada: ${error.message}`; }
+        const photo = await api('student_photo', { admin: true, method: 'POST', body: JSON.stringify({ student_id: saved.id, data_url: await resizeStudentPhoto(photoFile) }) });
+        Object.assign(saved, photo);
+      } catch (error) { photoWarning = `Dados salvos, mas a foto não foi enviada: ${error.message}`; }
     }
-    event.currentTarget.reset();
-    resetStudentPhotoPreview();
-    toast(photoWarning || 'Aluno cadastrado e lista atualizada.');
+    resetStudentForm();
+    renderAdmin();
+    toast(photoWarning || (editing ? 'Cadastro atualizado com sucesso.' : 'Aluno cadastrado e lista atualizada.'));
     await loadAdminData();
-  } catch (error) { toast(error.message); }
-  finally { submit.disabled = false; submit.textContent = 'Salvar aluno'; }
+  } catch (error) { toast(error.message); $('#student-validation-summary').textContent = error.message; }
+  finally { submit.disabled = false; if (!$('#student-edit-id').value) submit.textContent = 'Salvar aluno'; }
 });
 
 async function resizeStudentPhoto(file) {

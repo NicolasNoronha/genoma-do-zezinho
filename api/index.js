@@ -33,6 +33,70 @@ const required = (input, fields) => {
   if (missing.length) throw new Error(`Preencha os campos obrigatórios: ${missing.join(', ')}.`);
 };
 const bodyOf = (req) => typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+const validationError = (message, status = 400) => {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+};
+
+function isValidCpf(value) {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digit = (length) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(cpf[index]) * (length + 1 - index);
+    const remainder = (sum * 10) % 11;
+    return remainder === 10 ? 0 : remainder;
+  };
+  return digit(9) === Number(cpf[9]) && digit(10) === Number(cpf[10]);
+}
+
+function ageOnDate(birthDate, reference = new Date()) {
+  const birth = new Date(`${birthDate}T12:00:00Z`);
+  if (Number.isNaN(birth.getTime())) return null;
+  let age = reference.getUTCFullYear() - birth.getUTCFullYear();
+  const birthday = new Date(Date.UTC(reference.getUTCFullYear(), birth.getUTCMonth(), birth.getUTCDate(), 12));
+  if (reference < birthday) age -= 1;
+  return age;
+}
+
+async function validatedStudent(sql, input, existingId = null) {
+  required(input, ['full_name', 'birth_date', 'guardian_name', 'phone']);
+  const fullName = String(input.full_name).trim().replace(/\s+/g, ' ');
+  const guardianName = String(input.guardian_name).trim().replace(/\s+/g, ' ');
+  const cpf = onlyDigits(input.cpf) || null;
+  const guardianCpf = onlyDigits(input.guardian_cpf) || null;
+  const phone = onlyDigits(input.phone);
+  const email = String(input.email || '').trim().toLowerCase() || null;
+  const birthDate = String(input.birth_date || '');
+  const classId = input.class_id ? Number(input.class_id) : null;
+  if (fullName.length < 3) validationError('Informe o nome completo do aluno.');
+  if (guardianName.length < 3) validationError('Informe o nome completo do responsável.');
+  if (cpf && !isValidCpf(cpf)) validationError('CPF do aluno inválido.');
+  if (guardianCpf && !isValidCpf(guardianCpf)) validationError('CPF do responsável inválido.');
+  if (phone.length < 10 || phone.length > 11) validationError('Informe um telefone com DDD válido.');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email)) validationError('Informe um e-mail válido.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || ageOnDate(birthDate) === null) validationError('Informe uma data de nascimento válida.');
+  const age = ageOnDate(birthDate);
+  if (age < 3 || age > 20) validationError('A idade do aluno deve estar entre 3 e 20 anos.');
+  if (classId) {
+    const [classRow] = await sql`select c.*, count(s.id)::int as student_count from classes c left join students s on s.class_id = c.id and s.id <> ${existingId || 0} and s.status <> 'Inativo' where c.id = ${classId} group by c.id`;
+    if (!classRow) validationError('A turma selecionada não existe.');
+    if (!classRow.active) validationError('A turma selecionada está inativa.');
+    if (age < Number(classRow.min_age) || age > Number(classRow.max_age)) {
+      validationError(`O aluno precisa ter entre ${classRow.min_age} e ${classRow.max_age} anos para a turma ${classRow.name}.`);
+    }
+    if (Number(classRow.student_count) >= Number(classRow.capacity)) validationError('A turma selecionada não possui vagas disponíveis.');
+  }
+  return {
+    classId, fullName, cpf, birthDate,
+    medicalNotes: String(input.medical_notes || '').trim(), guardianName, guardianCpf,
+    relationship: String(input.relationship || '').trim(), phone, email,
+    imageAuthorized: Boolean(input.image_authorized),
+    status: ['Ativo', 'Pré-inscrição', 'Inativo'].includes(input.status) ? input.status : 'Ativo',
+  };
+}
 
 function sessionSecret() {
   const value = process.env.SESSION_SECRET;
@@ -151,7 +215,7 @@ export default async function handler(req, res) {
     const sql = database();
 
     if (action === 'classes' && method === 'GET') {
-      const rows = await sql`select c.*, count(s.id)::int as student_count from classes c left join students s on s.class_id = c.id group by c.id order by c.created_at desc`;
+      const rows = await sql`select c.*, count(s.id)::int as student_count from classes c left join students s on s.class_id = c.id and s.status <> 'Inativo' group by c.id order by c.created_at desc`;
       return json(res, 200, { ok: true, data: rows });
     }
     if (action === 'classes' && method === 'POST') {
@@ -171,13 +235,44 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, data });
     }
     if (action === 'students' && method === 'POST') {
-      const input = bodyOf(req); required(input, ['full_name', 'birth_date', 'guardian_name', 'phone']);
+      const input = bodyOf(req);
       const admin = isAdmin(req);
-      const classId = admin && input.class_id ? Number(input.class_id) : null;
-      const status = admin ? String(input.status || 'Ativo').trim() : 'Pré-inscrição';
+      const data = await validatedStudent(sql, { ...input, class_id: admin ? input.class_id : null, status: admin ? input.status : 'Pré-inscrição' });
+      if (!admin) {
+        const [publicClass] = await sql`select name, min_age, max_age from classes where active = true order by created_at asc limit 1`;
+        const age = ageOnDate(data.birthDate);
+        if (publicClass && (age < Number(publicClass.min_age) || age > Number(publicClass.max_age))) {
+          validationError(`Nesta pré-inscrição, o aluno precisa ter entre ${publicClass.min_age} e ${publicClass.max_age} anos.`);
+        }
+      }
       const [row] = await sql`insert into students (class_id, full_name, cpf, birth_date, medical_notes, guardian_name, guardian_cpf, relationship, phone, email, image_authorized, status)
-        values (${classId}, ${String(input.full_name).trim()}, ${String(input.cpf || '').trim() || null}, ${input.birth_date}, ${String(input.medical_notes || '').trim()}, ${String(input.guardian_name).trim()}, ${String(input.guardian_cpf || '').trim() || null}, ${String(input.relationship || '').trim()}, ${String(input.phone).trim()}, ${String(input.email || '').trim() || null}, ${Boolean(input.image_authorized)}, ${status}) returning *`;
+        values (${data.classId}, ${data.fullName}, ${data.cpf}, ${data.birthDate}, ${data.medicalNotes}, ${data.guardianName}, ${data.guardianCpf}, ${data.relationship}, ${data.phone}, ${data.email}, ${data.imageAuthorized}, ${data.status}) returning *`;
       return json(res, 201, { ok: true, data: row });
+    }
+    if (action === 'students' && method === 'PATCH') {
+      requireAdmin(req);
+      const input = bodyOf(req); required(input, ['id']);
+      const id = Number(input.id);
+      const [existing] = await sql`select * from students where id = ${id}`;
+      if (!existing) return json(res, 404, { ok: false, error: 'Aluno não encontrado.' });
+      const data = await validatedStudent(sql, input, id);
+      const [row] = await sql`update students set class_id = ${data.classId}, full_name = ${data.fullName}, cpf = ${data.cpf}, birth_date = ${data.birthDate}, medical_notes = ${data.medicalNotes}, guardian_name = ${data.guardianName}, guardian_cpf = ${data.guardianCpf}, relationship = ${data.relationship}, phone = ${data.phone}, email = ${data.email}, image_authorized = ${data.imageAuthorized}, status = ${data.status}, updated_at = now() where id = ${id} returning *`;
+      const [classRow] = row.class_id ? await sql`select name from classes where id = ${row.class_id}` : [];
+      return json(res, 200, { ok: true, data: { ...row, class_name: classRow?.name || null, photo_url: await signedPhotoUrl(row.photo_path) } });
+    }
+    if (action === 'students' && method === 'DELETE') {
+      requireAdmin(req);
+      const input = bodyOf(req); required(input, ['id']);
+      const id = Number(input.id);
+      const [student] = await sql`select id, full_name, photo_path from students where id = ${id}`;
+      if (!student) return json(res, 404, { ok: false, error: 'Aluno não encontrado.' });
+      const [financial] = await sql`select count(*)::int as total from charges where student_id = ${id}`;
+      if (Number(financial.total) > 0) return json(res, 409, { ok: false, error: 'Este aluno possui histórico financeiro. Edite o cadastro e altere o status para Inativo.' });
+      await sql`delete from students where id = ${id}`;
+      if (student.photo_path) {
+        try { await supabaseStorage().storage.from('student-photos').remove([student.photo_path]); } catch { /* A exclusão do cadastro não depende da limpeza do arquivo. */ }
+      }
+      return json(res, 200, { ok: true, data: { id, full_name: student.full_name } });
     }
     if (action === 'student_photo' && method === 'POST') {
       requireAdmin(req);
