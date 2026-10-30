@@ -1,11 +1,26 @@
 import crypto from 'node:crypto';
 import postgres from 'postgres';
 
-const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
-const localConnection = /(?:localhost|127\.0\.0\.1)/i.test(connectionString || '');
-const sql = connectionString
-  ? postgres(connectionString, { max: 1, prepare: false, ssl: localConnection ? false : 'require', idle_timeout: 20 })
-  : null;
+let sqlClient;
+
+function database() {
+  if (sqlClient) return sqlClient;
+  const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('POSTGRES_URL não configurada.');
+  const localConnection = /(?:localhost|127\.0\.0\.1)/i.test(connectionString);
+  try {
+    sqlClient = postgres(connectionString, {
+      max: 1,
+      prepare: false,
+      ssl: localConnection ? false : 'require',
+      idle_timeout: 20,
+      connect_timeout: 10,
+    });
+    return sqlClient;
+  } catch {
+    throw new Error('POSTGRES_URL inválida. Copie novamente a URL do Transaction pooler e codifique caracteres especiais da senha.');
+  }
+}
 
 const json = (res, status, payload) => res.status(status).json(payload);
 const required = (input, fields) => {
@@ -73,7 +88,7 @@ export default async function handler(req, res) {
   const method = req.method || 'GET';
   try {
     if (action === 'health') {
-      if (!sql) throw new Error('POSTGRES_URL não configurada.');
+      const sql = database();
       await sql`select 1`;
       return json(res, 200, { ok: true, database: 'connected', mercado_pago: process.env.MERCADO_PAGO_ACCESS_TOKEN ? 'configured' : 'missing' });
     }
@@ -86,7 +101,7 @@ export default async function handler(req, res) {
       if (!valid) return json(res, 401, { ok: false, error: 'PIN incorreto.' });
       return json(res, 200, { ok: true, data: { token: createToken() } });
     }
-    if (!sql) throw new Error('POSTGRES_URL não configurada.');
+    const sql = database();
 
     if (action === 'classes' && method === 'GET') {
       const rows = await sql`select c.*, count(s.id)::int as student_count from classes c left join students s on s.class_id = c.id group by c.id order by c.created_at desc`;
