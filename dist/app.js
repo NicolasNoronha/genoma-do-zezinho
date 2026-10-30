@@ -2,8 +2,8 @@ const $ = (selector, context = document) => context.querySelector(selector);
 const $$ = (selector, context = document) => [...context.querySelectorAll(selector)];
 const API_URL = '/api';
 const WHATSAPP_NUMBER = '';
-const ENROLLMENT_FEE = 70;
-const MONTHLY_FEE = 90;
+const ENROLLMENT_FEE = 1;
+const MONTHLY_FEE = 1;
 
 const state = { students: [], classes: [], charges: [], generatedCharge: null };
 let adminToken = sessionStorage.getItem('gz_admin_token') || '';
@@ -120,11 +120,12 @@ enrollmentForm.addEventListener('submit', async (event) => {
 });
 $('.finish-enrollment').addEventListener('click', () => enrollmentDialog.close());
 
-$('#open-admin').addEventListener('click', () => {
+$$('.open-admin').forEach((button) => button.addEventListener('click', () => {
+  $('.main-nav').classList.remove('open');
   adminDialog.showModal();
   $('#admin-login').style.display = 'flex';
   $('#admin-panel').classList.remove('active');
-});
+}));
 $('#admin-login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = $('button', event.currentTarget);

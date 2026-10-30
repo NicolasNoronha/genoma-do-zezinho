@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import postgres from 'postgres';
+import { createClient } from '@supabase/supabase-js';
 
 let sqlClient;
+let supabaseAdminClient;
 
 function database() {
   if (sqlClient) return sqlClient;
@@ -63,29 +65,23 @@ function requireAdmin(req) {
 
 function supabaseStorage() {
   const url = String(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceKey) {
+  const secretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !secretKey) {
     const error = new Error('Fotos ainda não foram configuradas no servidor.');
     error.status = 503;
     throw error;
   }
-  return { url, serviceKey };
+  if (!supabaseAdminClient) {
+    supabaseAdminClient = createClient(url, secretKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  }
+  return supabaseAdminClient;
 }
-
-const storageObjectPath = (value) => String(value).split('/').map(encodeURIComponent).join('/');
 
 async function signedPhotoUrl(path) {
   if (!path) return null;
   try {
-    const { url, serviceKey } = supabaseStorage();
-    const response = await fetch(`${url}/storage/v1/object/sign/student-photos/${storageObjectPath(path)}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiresIn: 3600 }),
-    });
-    if (!response.ok) return null;
-    const result = await response.json();
-    return result.signedURL ? `${url}/storage/v1${result.signedURL}` : null;
+    const { data, error } = await supabaseStorage().storage.from('student-photos').createSignedUrl(path, 3600);
+    return error ? null : data.signedUrl;
   } catch { return null; }
 }
 
@@ -104,21 +100,8 @@ async function uploadStudentPhoto(studentId, dataUrl) {
   }
   const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[match[1]];
   const path = `${studentId}/${crypto.randomUUID()}.${extension}`;
-  const { url, serviceKey } = supabaseStorage();
-  const response = await fetch(`${url}/storage/v1/object/student-photos/${storageObjectPath(path)}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      apikey: serviceKey,
-      'Content-Type': match[1],
-      'x-upsert': 'true',
-    },
-    body: buffer,
-  });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    throw new Error(result.message || result.error || 'Não foi possível salvar a foto.');
-  }
+  const { error } = await supabaseStorage().storage.from('student-photos').upload(path, buffer, { contentType: match[1], upsert: true });
+  if (error) throw new Error(error.message || 'Não foi possível salvar a foto.');
   return path;
 }
 
@@ -217,7 +200,7 @@ export default async function handler(req, res) {
       if (!student) return json(res, 404, { ok: false, error: 'Aluno não encontrado.' });
       const mode = input.mode === 'subscription' ? 'subscription' : 'one_time';
       const includeEnrollment = mode === 'one_time' && Boolean(input.include_enrollment);
-      const total = mode === 'subscription' ? 90 : 90 + (includeEnrollment ? 70 : 0);
+      const total = mode === 'subscription' ? 1 : 1 + (includeEnrollment ? 1 : 0);
       const [charge] = await sql`insert into charges (student_id, mode, include_enrollment, include_monthly, total_amount, reference, due_date, status)
         values (${student.id}, ${mode}, ${includeEnrollment}, true, ${total}, ${String(input.reference).trim()}, ${input.due_date || null}, 'creating') returning id`;
       const externalReference = `GZ-CHARGE-${charge.id}`;
@@ -226,11 +209,11 @@ export default async function handler(req, res) {
         if (!student.email) throw new Error('O aluno precisa ter e-mail do responsável para criar uma assinatura.');
         const backUrl = process.env.MERCADO_PAGO_BACK_URL;
         if (!backUrl) throw new Error('MERCADO_PAGO_BACK_URL não configurada.');
-        result = await mercadoPago('/preapproval', 'POST', { reason: 'Mensalidade Genoma do Zezinho', external_reference: externalReference, payer_email: student.email, back_url: backUrl, auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: 90, currency_id: 'BRL' }, status: 'pending' });
+        result = await mercadoPago('/preapproval', 'POST', { reason: 'Mensalidade Genoma do Zezinho', external_reference: externalReference, payer_email: student.email, back_url: backUrl, auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: 1, currency_id: 'BRL' }, status: 'pending' });
       } else {
         const items = [];
-        if (includeEnrollment) items.push({ id: 'inscricao', title: 'Taxa de inscrição — Genoma do Zezinho', quantity: 1, currency_id: 'BRL', unit_price: 70 });
-        items.push({ id: 'mensalidade', title: `Mensalidade — ${String(input.reference).trim()}`, quantity: 1, currency_id: 'BRL', unit_price: 90 });
+        if (includeEnrollment) items.push({ id: 'inscricao', title: 'Taxa de inscrição — Genoma do Zezinho', quantity: 1, currency_id: 'BRL', unit_price: 1 });
+        items.push({ id: 'mensalidade', title: `Mensalidade — ${String(input.reference).trim()}`, quantity: 1, currency_id: 'BRL', unit_price: 1 });
         const payload = { items, external_reference: externalReference, payer: { name: student.guardian_name, email: student.email || undefined }, payment_methods: { installments: 1 } };
         if (process.env.MERCADO_PAGO_WEBHOOK_URL) payload.notification_url = process.env.MERCADO_PAGO_WEBHOOK_URL;
         result = await mercadoPago('/checkout/preferences', 'POST', payload);

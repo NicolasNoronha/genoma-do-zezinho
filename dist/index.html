@@ -6,7 +6,7 @@
   <meta name="description" content="Genoma do Zezinho — escolinha de futebol 7 para jovens de 12 e 13 anos em Porto Alegre e região." />
   <meta name="theme-color" content="#a92d35" />
   <title>Genoma do Zezinho | Futebol, formação e futuro</title>
-  <link rel="stylesheet" href="styles.css?v=20261027" />
+  <link rel="stylesheet" href="styles.css?v=20261030-site" />
 </head>
 <body>
   <div class="notice"><span>Temporada de lançamento</span><strong>30 vagas para o Sub-13</strong></div>
@@ -18,8 +18,12 @@
     <button class="menu-toggle" aria-label="Abrir menu" aria-expanded="false">☰</button>
     <nav class="main-nav" aria-label="Navegação principal">
       <a href="#programa">Programa</a><a href="#historia">Nossa história</a><a href="#galeria">Galeria</a><a href="#contato">Contato</a>
+      <button class="mobile-admin-entry open-admin" type="button">Área administrativa →</button>
     </nav>
-    <button class="btn btn-small whatsapp-contact">Fale no WhatsApp</button>
+    <div class="header-actions">
+      <button class="admin-entry open-admin" type="button" aria-label="Entrar na área administrativa"><span>Área administrativa</span> ↗</button>
+      <button class="btn btn-small whatsapp-contact" type="button">WhatsApp</button>
+    </div>
   </header>
 
   <main>
@@ -54,6 +58,15 @@
         <p class="eyebrow"><span></span> O nosso programa</p>
         <h2>Mais que jogar.<br><em>Aprender o jogo.</em></h2>
         <p>Um ambiente de formação que respeita cada fase do atleta e desenvolve competências dentro e fora do campo.</p>
+      </div>
+      <div class="program-showcase reveal">
+        <img src="assets/treino-sub13-ilustrativo.jpg" alt="Imagem ilustrativa de jovens em treino de futebol 7" />
+        <div class="program-showcase-copy">
+          <span>Metodologia completa</span>
+          <strong>Treinar o atleta.<br>Formar a pessoa.</strong>
+          <p>Atividades dinâmicas, orientação próxima e evolução acompanhada em cada etapa.</p>
+        </div>
+        <div class="program-showcase-badge"><b>3</b><span>pilares de<br>desenvolvimento</span></div>
       </div>
       <div class="pillars">
         <article class="pillar reveal"><span>01</span><div class="line-icon">⌁</div><h3>Técnica</h3><p>Domínio, passe, condução, finalização e tomada de decisão em situações reais de jogo.</p></article>
@@ -120,7 +133,7 @@
   <footer>
     <div class="brand footer-brand"><span class="brand-mark">GZ</span><span><b>GENOMA</b><small>DO ZEZINHO</small></span></div>
     <p>Futebol, formação e futuro.<br>Porto Alegre e região metropolitana.</p>
-    <div class="footer-links"><a href="#programa">Programa</a><a href="#historia">História</a><a href="#galeria">Galeria</a><button id="open-admin">Área administrativa</button></div>
+    <div class="footer-links"><a href="#programa">Programa</a><a href="#historia">História</a><a href="#galeria">Galeria</a><button class="open-admin">Área administrativa</button></div>
     <small>© 2026 Genoma do Zezinho · Projeto independente · Protótipo privado</small>
   </footer>
 
@@ -189,13 +202,14 @@
               <div class="table-head"><div><small>Mercado Pago</small><h3>Gerar link de pagamento</h3></div></div>
               <label>Aluno<select required id="charge-student"><option value="">Selecione um aluno</option></select></label>
               <label>Modalidade da cobrança<select required id="charge-mode"><option value="one_time">Cobrança avulsa — Pix ou cartão</option><option value="subscription">Assinatura mensal recorrente</option></select></label>
-              <div class="charge-options"><label class="check"><input id="include-enrollment" type="checkbox" checked /><span>Taxa de inscrição <b>R$ 70,00</b></span></label><label class="check"><input id="include-monthly" type="checkbox" checked /><span>Mensalidade <b>R$ 90,00</b></span></label></div>
-              <div class="charge-total"><span>Total do link</span><b id="charge-total-value">R$ 160,00</b></div>
+              <div class="test-payment-notice">Valores temporários para validar o pagamento em produção</div>
+              <div class="charge-options"><label class="check"><input id="include-enrollment" type="checkbox" checked /><span>Taxa de inscrição <b>R$ 1,00</b></span></label><label class="check"><input id="include-monthly" type="checkbox" checked /><span>Mensalidade <b>R$ 1,00</b></span></label></div>
+              <div class="charge-total"><span>Total do link</span><b id="charge-total-value">R$ 2,00</b></div>
               <div class="form-row"><label>Referência<input required id="charge-reference" placeholder="Ex.: Novembro/2026" /></label><label>Vencimento<input required id="charge-due" type="date" /></label></div>
               <button class="btn" type="submit">Gerar link no Mercado Pago</button>
               <div id="charge-result" class="charge-result" hidden><small>Link gerado com sucesso</small><a id="generated-link" href="#" target="_blank" rel="noopener"></a><div><button id="copy-payment-link" type="button">Copiar link</button><button id="send-payment-whatsapp" type="button">Enviar no WhatsApp ↗</button></div></div>
             </form>
-            <article class="charge-help"><span>↗</span><h3>Pix, cartão ou recorrência</h3><p>A cobrança avulsa soma os itens selecionados. A assinatura cria uma mensalidade recorrente de R$ 90,00.</p><small>A taxa de inscrição não entra na assinatura recorrente; quando marcada, deve ser enviada como cobrança inicial separada.</small></article>
+            <article class="charge-help"><span>↗</span><h3>Pix, cartão ou recorrência</h3><p>A cobrança avulsa soma os itens selecionados. Durante os testes, a assinatura cria uma mensalidade recorrente de R$ 1,00.</p><small>A taxa de inscrição não entra na assinatura recorrente; quando marcada, deve ser enviada como cobrança inicial separada.</small></article>
           </div>
           <div class="table-card"><div class="table-head"><h3>Cobranças cadastradas</h3><span id="charges-total">0 cobranças</span></div><div class="table-wrap"><table><thead><tr><th>Aluno</th><th>Descrição</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead><tbody id="charges-table"></tbody></table></div></div>
         </div>
@@ -205,6 +219,6 @@
   </dialog>
 
   <div class="toast" role="status"></div>
-  <script src="app.js?v=20261030-admin"></script>
+  <script src="app.js?v=20261030-site"></script>
 </body>
 </html>
